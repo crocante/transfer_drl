@@ -1,0 +1,35 @@
+dyn_model:
+    num_fc_layers: 1
+    depth_fc_layers: 500
+    batchsize: 512
+    lr: 0.001
+    nEpoch: 40
+
+data_collection:
+    use_threading: True
+    num_rollouts_train: 10
+    num_rollouts_val: 20
+
+aggregation:
+    num_aggregation_iters: 800
+
+steps:
+    dt_steps: 1
+    steps_per_episode: 1000
+    steps_per_rollout_train: 1000
+    steps_per_rollout_val: 1000
+
+noise:
+    make_aggregated_dataset_noisy: True
+    make_training_dataset_noisy: True
+    noise_actions_during_MPC_rollouts: True
+
+policy:
+    steps_per_epoch: 4000
+    gamma: 0.99
+    hid: 64
+    l: 2
+    max_ep_len: 1000
+    train_pi_iters: 50
+    train_v_iters: 50
+    target_kl: 0.02
