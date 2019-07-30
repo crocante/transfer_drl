@@ -14,7 +14,6 @@ def get_model_samples(env, local_steps_per_epoch, sess, agent, logger, max_ep_le
     o, r, d, ep_ret, ep_len = env.reset(), 0, False, 0, 0
     for t in range(local_steps_per_epoch):
         a, v_t, logp_t = sess.run(agent.get_action_ops, feed_dict={agent.x_ph: o.reshape(1, -1)})
-
         agent.buf.store(o, a, r, v_t, logp_t)
         logger.store(VVals=v_t)
         observation = np.copy(o)
@@ -24,59 +23,26 @@ def get_model_samples(env, local_steps_per_epoch, sess, agent, logger, max_ep_le
         ep_len += 1
         o = next_o
 
-        if (t == local_steps_per_epoch - 1):
+        if ((t+1) % max_ep_len ==0):
             last_val = r if d else sess.run(agent.v, feed_dict={agent.x_ph: o.reshape(1, -1)})
             agent.buf.finish_path(last_val)
             logger.store(AvgRew_model=ep_ret/local_steps_per_epoch)
+
             # ep_return.append(ep_ret)
 
-def get_samples(env, local_steps_per_epoch, sess, agent, logger, max_ep_len):
-    o, r, d, ep_ret, ep_len = env.reset(), 0, False, 0, 0
+def get_samples(env, steps_per_epoch, sess, agent, logger, max_ep_len):
+    #collect samples and store in PPOBuffer, to train dyn_model in next iteration and do outer_policy_update
+    #steps_per_epoch: number of steps should collect
+    #max_ep_len: max length of each rollout
+    observations_list = []
+    actions_list = []
+    rewards_list = []
+    returns_list = []
     observations = []
     actions = []
-    rewards = []
-    for t in range(local_steps_per_epoch):
-        a, v_t, logp_t = sess.run(agent.get_action_ops, feed_dict={agent.x_ph: o.reshape(1, -1)})
 
-        # save and log
-        # agent.buf.store(o, a, r, v_t, logp_t)
-        logger.store(VVals=v_t)
-        observation = np.copy(o)
-        action = np.copy(a[0])
-        observations.append(observation)
-        actions.append(action)
-
-        next_o, r, d, _ = env.step(a[0])
-        rewards.append(r)
-        # store o,a,next_o,r
-
-        ep_ret += r
-        ep_len += 1
-        o = next_o
-
-        terminal = d or (ep_len == max_ep_len)
-        if terminal or (t == local_steps_per_epoch - 1):
-            if not (terminal):
-                print('Warning: trajectory cut off by epoch at %d steps.' % ep_len)
-            # if trajectory didn't reach terminal state, bootstrap value target
-            # last_val = r if d else sess.run(agent.v, feed_dict={agent.x_ph: o.reshape(1, -1)})
-            # agent.buf.finish_path(last_val)
-            if terminal:
-                # only save EpRet / EpLen if trajectory finished
-                logger.store(EpRet=ep_ret, EpLen=ep_len)
-            # ep_return.append(ep_ret)
-            # o, r, d, ep_ret, ep_len = env.reset(), 0, False, 0, 0
-            return observations, actions, rewards
-
-def get_samples_with_buf(env, local_steps_per_epoch, sess, agent, logger, max_ep_len):
     o, r, d, ep_ret, ep_len = env.reset(), 0, False, 0, 0
-    observations = []
-    actions = []
-    rewards = []
-    epoch = 0
-    ep_return = 0
-    total_rewards = 0
-    for t in range(local_steps_per_epoch):
+    for t in range(steps_per_epoch):
         a, v_t, logp_t = sess.run(agent.get_action_ops, feed_dict={agent.x_ph: o.reshape(1, -1)})
 
         # save and log
@@ -88,33 +54,41 @@ def get_samples_with_buf(env, local_steps_per_epoch, sess, agent, logger, max_ep
         actions.append(action)
 
         next_o, r, d, _ = env.step(a[0])
-        rewards.append(r)
-        # store o,a,next_o,r
-
+        rewards_list.append(r)
         ep_ret += r
-        total_rewards += r
         ep_len += 1
         o = next_o
 
-        terminal = d or (ep_len == max_ep_len)
-        if terminal or (t == local_steps_per_epoch - 1):
+        terminal = d or (ep_len == max_ep_len)#or:从左到右扫描，返回第一个为真的表达式值，无真值则返回最后一个表达式值
+        if terminal or (t == steps_per_epoch - 1):
             if not (terminal):
                 print('Warning: trajectory cut off by epoch at %d steps.' % ep_len)
             # if trajectory didn't reach terminal state, bootstrap value target
             last_val = r if d else sess.run(agent.v, feed_dict={agent.x_ph: o.reshape(1, -1)})
             agent.buf.finish_path(last_val)
             if terminal:
-                epoch+=1
                 # only save EpRet / EpLen if trajectory finished
-                # logger.store(EpRet=ep_ret, EpLen=ep_len)
-                ep_return += ep_ret
+                logger.store(EpRet=ep_ret, EpLen=ep_len)
+                returns_list.append(ep_ret)
+            observations_list.append(np.array(observations))
+            actions_list.append(np.array(actions))
+            observations = []
+            actions = []
             o, r, d, ep_ret, ep_len = env.reset(), 0, False, 0, 0
-    return ep_return/epoch, total_rewards/local_steps_per_epoch
+    return observations_list, actions_list, rewards_list, returns_list
+
+def collect_samples(num_rollouts, env, steps_per_rollout, sess, agent, logger, max_ep_len):
+    #collect samples and store in TRPOBuffer, to train dyn_model and policy in next iteration
+    for rollout_number in range(num_rollouts):
+        perform_rollouts(env, steps_per_rollout, sess, agent, logger, max_ep_len)
+
+    memory_size = agent.AdaptBuf.size
+    return memory_size
 
 def perform_rollouts(env, local_steps_per_epoch, sess, agent, logger, max_ep_len):
-    observations = []
-    actions = []
-    rewards = []
+    # observations = []
+    # actions = []
+    # rewards = []
     o, r, d, ep_ret, ep_len = env.reset(), 0, False, 0, 0
     for t in range(local_steps_per_epoch):
         a, v_t, logp_t = sess.run(agent.get_action_ops, feed_dict={agent.x_ph: o.reshape(1, -1)})
@@ -124,13 +98,14 @@ def perform_rollouts(env, local_steps_per_epoch, sess, agent, logger, max_ep_len
         logger.store(VVals=v_t)
         observation = np.copy(o)
         action = np.copy(a[0])
-        observations.append(observation)
-        actions.append(action)
+        # observations.append(observation)
+        # actions.append(action)
 
         next_o, r, d, _ = env.step(a[0])
-        rewards.append(r)
+        # rewards.append(r)
         # store o,a,next_o,r
 
+        agent.AdaptBuf.store(observation, action, r, next_o, d)
         ep_ret += r
         ep_len += 1
         o = next_o
@@ -147,107 +122,71 @@ def perform_rollouts(env, local_steps_per_epoch, sess, agent, logger, max_ep_len
                 logger.store(EpRet=ep_ret, EpLen=ep_len)
             # ep_return.append(ep_ret)
             # o, r, d, ep_ret, ep_len = env.reset(), 0, False, 0, 0
-            return observations, actions, rewards, ep_ret, ep_len
+            # return observations, actions, rewards, ep_ret, ep_len
 
-def collect_samples(num_rollouts, env, steps_per_rollout, sess, agent, logger, max_ep_len):
+def collect_samples_new(num_rollouts, env, steps_per_rollout, sess, logger, agent, max_ep_len):
+    ##########for run_train.py to collect data after update policy  2019.7.28###########
+    ##########with trpo_buf#########
     observations_list = []
     actions_list = []
     rewards_list = []
-    return_list = []
+    rolloutrewards_list = []
     for rollout_number in range(num_rollouts):
-        observations, actions, reward_for_rollout, return_for_rollout, len_for_rollout = perform_rollouts(env,
-                                                            steps_per_rollout, sess, agent, logger, max_ep_len)
-        rewards_list.append(reward_for_rollout)
+        observations, actions, rewards, reward_for_rollout = perform_rollouts_new(env, steps_per_rollout, sess, logger,
+                                                                                  agent, max_ep_len)
+        rolloutrewards_list.append(reward_for_rollout)
         observations = np.array(observations)
         actions = np.array(actions)
         observations_list.append(observations)
         actions_list.append(actions)
-        return_list.append(return_for_rollout)
+        rewards_list.append(rewards)
 
-    return observations_list, actions_list, rewards_list
+        # return list of length = num rollouts
+        # each entry of that list contains one rollout
+        # each entry is [steps_per_rollout x statespace_dim] or [steps_per_rollout x actionspace_dim]
+    return observations_list, actions_list, rewards_list, rolloutrewards_list
 
-def perform_rollouts_comp(env, local_steps_per_epoch, sess, agent, logger, max_ep_len):
-    traj_taken = []
+def perform_rollouts_new(env, steps_per_epoch, sess, logger, agent, max_ep_len):
     observations = []
-    observations_model = []
     actions = []
     rewards = []
-    rewards_model = []
-    o, r, d, ep_ret, ret_model, ep_len = env.reset(), 0, False, 0, 0, 0
-    traj_taken.append(np.array(o))
-    for t in range(local_steps_per_epoch):
-        a, v_t, logp_t = sess.run(agent.get_action_ops, feed_dict={agent.x_ph: o.reshape(1, -1)})
+    reward_for_rollout = 0
+    o, reward, d, ep_ret, ret_model, ep_len = env.reset(), 0, False, 0, 0, 0
+    for t in range(steps_per_epoch):
+        agent_outs = sess.run(agent.get_action_ops, feed_dict={agent.x_ph: o.reshape(1, -1)})
+        a, v_t, logp_t, info_t = agent_outs[0][0], agent_outs[1], agent_outs[2], agent_outs[3:]
 
         # save and log
-        # agent.buf.store(o, a, r, v_t, logp_t)
+        agent.buf.store(o, a, reward, v_t, logp_t, info_t)
         logger.store(VVals=v_t)
+        # a, v_t, logp_t = sess.run(agent.get_action_ops, feed_dict={agent.x_ph: o.reshape(1, -1)})
         observation = np.copy(o)
-        action = np.copy(a[0])
+        action = np.copy(a)
         observations.append(observation)
         actions.append(action)
 
-        next_o, r, d, _ = env.step(a[0])
-        model_next_o, model_r = agent.do_forward(observation, action)
-        observations_model.append(model_next_o)
-        traj_taken.append(np.array(next_o))
-        rewards.append(r)
-        rewards_model.append(model_r)
-        # store o,a,next_o,r
+        next_observation, reward, terminal, _ = env.step(action)
+        # env.render()
+        rewards.append(reward)
+        reward_for_rollout += reward
 
-        ep_ret += r
-        ret_model += model_r
+        o = np.copy(next_observation)
+        ep_ret += reward
         ep_len += 1
-        o = next_o
 
         terminal = d or (ep_len == max_ep_len)
-        if terminal or (t == local_steps_per_epoch - 1):
+        if terminal or (t == steps_per_epoch - 1):
             if not (terminal):
                 print('Warning: trajectory cut off by epoch at %d steps.' % ep_len)
             # if trajectory didn't reach terminal state, bootstrap value target
-            # last_val = r if d else sess.run(agent.v, feed_dict={agent.x_ph: o.reshape(1, -1)})
-            # agent.buf.finish_path(last_val)
+            last_val = reward if d else sess.run(agent.v, feed_dict={agent.x_ph: o.reshape(1, -1)})
+            agent.buf.finish_path(last_val)
             if terminal:
                 # only save EpRet / EpLen if trajectory finished
                 logger.store(EpRet=ep_ret, EpLen=ep_len)
-            # ep_return.append(ep_ret)
-            # o, r, d, ep_ret, ep_len = env.reset(), 0, False, 0, 0
-            return observations, observations_model, actions, rewards, rewards_model, ep_ret, ret_model, ep_len, traj_taken,
+            o, reward, d, ep_ret, ep_len = env.reset(), 0, False, 0, 0
 
-def collect_samples_comp(num_rollouts, env, steps_per_rollout, sess, agent, logger, max_ep_len):
-    traj_list = []
-    x_list = []
-    z_list = []
-    x_model_list = []
-    z_model_list = []
-    actions_list = []
-    rewards_list = []
-    rewards_model_list = []
-    return_list = []
-    return_model_list = []
-    for rollout_number in range(num_rollouts):
-        observations, observations_model, actions, reward_for_rollout, model_reward_for_rollout, \
-             return_for_rollout, model_return_for_rollout, len_for_rollout, traj_taken = perform_rollouts_comp(env,
-                                                                steps_per_rollout, sess, agent, logger, max_ep_len)
-        observations_x = np.array(observations)[:, 0]
-        observations_z = np.array(observations)[:, 1]
-        observations_x_model = np.array(observations_model)[:, 0]
-        observations_z_model = np.array(observations_model)[:, 1]
-        for i in range(len_for_rollout):
-            rewards_list.append(reward_for_rollout[i])
-            rewards_model_list.append(model_reward_for_rollout[i])
-            x_list.append(observations_x[i])
-            x_model_list.append(observations_x_model[i])
-            z_list.append(observations_z[i])
-            z_model_list.append(observations_z_model[i])
-
-        actions = np.array(actions)
-        actions_list.append(actions)
-        return_list.append(return_for_rollout)
-        return_model_list.append(model_return_for_rollout)
-        traj_list.append(np.array(traj_taken))
-
-    return x_list, x_model_list, z_list, z_model_list, actions_list, rewards_list, rewards_model_list, return_list,\
-           return_model_list, traj_list
+    return observations, actions, rewards, reward_for_rollout
 
 def perform_rollouts_comp1(env, local_steps_per_epoch, sess, agent, logger, max_ep_len):
     traj_taken = []
@@ -313,3 +252,14 @@ def collect_samples_comp1(num_rollouts, env, steps_per_rollout, sess, agent, log
         traj_list.append(np.array(traj_taken))
 
     return x_list, z_list, actions_list, rewards_list, return_list, traj_list
+
+def get_reward(observation, action, next_observation):
+    lb = -np.ones(action.shape, dtype="float32")
+    ub = np.ones(action.shape, dtype="float32")
+    _normalization_scale = 10.0
+    scaled_action = lb + (action + _normalization_scale) * (ub - lb) / (2 * _normalization_scale)
+    scaled_action = np.clip(scaled_action, lb, ub)
+    reward_ctrl = - 0.5 * 0.1 * np.square(scaled_action).sum()
+    reward_run = (next_observation[0] - observation[0])/0.05
+    reward = reward_ctrl + reward_run
+    return reward

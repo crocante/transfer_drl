@@ -1,10 +1,10 @@
 import numpy as np
-import numpy.random as npr
-import tensorflow as tf
-import time
-import math
-import matplotlib.pyplot as plt
-import copy
+# import numpy.random as npr
+# import tensorflow as tf
+# import time
+# import math
+# import matplotlib.pyplot as plt
+# import copy
 
 def get_indices(which_agent):
     x_index = -7
@@ -91,10 +91,10 @@ def generate_training_data_inputs(states0, controls0):
     dataY= np.concatenate(new_controls, axis=0)
     return dataX, dataY
 
-def generate_training_data_outputs(states, rewards):
+def generate_training_data_outputs(states):
     #for each rollout, the output corresponding to each (s_i) is (s_i+1 - s_i)
     differences=[]
-    new_rewards=[]
+    # new_rewards=[]
     curr_item = states
     ####run_train.py
     # output = curr_item[1:curr_item.shape[0], :] - curr_item[0:curr_item.shape[0] - 1, :]
@@ -110,15 +110,8 @@ def generate_training_data_outputs(states, rewards):
         output = curr_item[1:curr_item.shape[0], :] - curr_item[0:curr_item.shape[0] - 1, :]
         differences.append(output)
 
-        curr_item = rewards[i]
-        length = len(curr_item)
-        new_rewards.append(np.array(curr_item[0:length - 1]))
-
     differences = np.concatenate(differences, axis=0)
-    # new_rewards = np.array(new_rewards)
-    new_rewards = np.concatenate(new_rewards, axis=0)
-    # new_rewards = new_rewards.reshape(-1, 1)
-    return differences, new_rewards
+    return differences
 
 def from_observation_to_usablestate(states, which_agent, just_one):
 

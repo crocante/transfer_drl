@@ -1,0 +1,35 @@
+dyn_model:
+    num_fc_layers: 2
+    depth_fc_layers: 700
+    batchsize: 512
+    lr: 0.001
+    nEpoch: 500
+    fraction_use_new: 0.9
+    fraction_use_val: 0.2
+    target_loss: 0.0005
+
+data_collection:
+    num_rollouts_train: 20
+
+aggregation:
+    num_aggregation_iters: 100
+    inner_aggregation_iters_k: 10
+
+noise:
+    make_aggregated_dataset_noisy: True
+    make_training_dataset_noisy: True
+    noise_actions_during_MPC_rollouts: True
+
+policy:
+    steps_per_epoch: 4000
+    gamma: 0.99
+    hid: 64
+    l: 2
+    max_ep_len: 200
+    train_pi_iters: 50
+    train_v_iters: 50
+    target_kl: 0.02
+
+steps:
+    steps_per_rollout_train: 200
+    steps_rollout_train: 4000
